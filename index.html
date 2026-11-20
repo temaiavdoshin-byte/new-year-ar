@@ -1,0 +1,74 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<title>Новогодняя AR-карта — диагностика</title>
+<script src="https://aframe.io/releases/1.6.0/aframe.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/mind-ar@1.2.5/dist/mindar-image-aframe.prod.js"></script>
+<style>
+  *{box-sizing:border-box}body{margin:0;font-family:system-ui,-apple-system,sans-serif;background:#141923;color:#fff}
+  #status{position:fixed;top:max(16px,env(safe-area-inset-top));left:12px;right:12px;z-index:1000;background:rgba(20,24,31,.9);border:1px solid rgba(255,255,255,.25);padding:14px;border-radius:16px;box-shadow:0 4px 24px #0005;font-size:14px}
+  #status strong{display:block;font-size:16px;margin-bottom:4px}#details{font-size:12px;color:#e0e3e9;margin-top:6px;overflow-wrap:anywhere}
+  #card{display:none;position:fixed;bottom:max(20px,env(safe-area-inset-bottom));left:5%;width:90%;z-index:1100;background:#fff;color:#202027;border-radius:20px;padding:22px;box-shadow:0 5px 25px #0006}#card a{display:inline-block;background:#b92d43;color:white;padding:11px 16px;border-radius:12px;text-decoration:none}
+  #close{float:right;border:0;background:#f0f0f0;border-radius:50%;width:32px;height:32px;font-size:18px}#retry{border:1px solid #fff8;background:#ffffff16;color:#fff;border-radius:8px;padding:7px 12px;margin-top:8px}
+</style>
+</head>
+<body>
+<div id="status" role="status" aria-live="polite">
+  <strong id="phase">Проверяем файл распознавания…</strong>
+  <div id="explain">Разрешите камеру и наведите её на новогодний постер.</div>
+  <div id="details">Статус: запуск</div>
+  <button id="retry" type="button" onclick="location.reload()">Перезапустить</button>
+</div>
+<div id="card" role="dialog" aria-label="Карточка проекта">
+  <button id="close" aria-label="Закрыть">×</button>
+  <h2 id="project-title"></h2><p id="project-description"></p><a id="project-link" href="#">Подробнее →</a>
+</div>
+<a-scene id="scene" mindar-image="imageTargetSrc: ./targets.mind; autoStart: true;" embedded color-space="sRGB" renderer="colorManagement: true" vr-mode-ui="enabled: false" device-orientation-permission-ui="enabled: false" loading-screen="enabled: false">
+  <a-camera position="0 0 0" look-controls="enabled: false" cursor="fuse: false; rayOrigin: mouse" raycaster="objects: .clickable"></a-camera>
+  <a-entity id="target" mindar-image-target="targetIndex: 0">
+    <a-circle class="clickable" data-project="ice" position="-0.346 -0.009 0.03" radius="0.065" color="#3678C5" opacity="0.9"></a-circle>
+    <a-circle class="clickable" data-project="gift" position="0.146 0.145 0.03" radius="0.065" color="#C53642" opacity="0.9"></a-circle>
+    <a-circle class="clickable" data-project="light" position="0.030 -0.197 0.03" radius="0.065" color="#96509E" opacity="0.9"></a-circle>
+  </a-entity>
+</a-scene>
+<script>
+const projects = {
+ ice:{title:'Каток в городе',description:'Локации и праздничные события',url:'https://example.com/?project=ice'},
+ gift:{title:'Подарки с историей',description:'Истории новогодних подарков',url:'https://example.com/?project=gift'},
+ light:{title:'Свет праздника',description:'Инсталляции и праздничные маршруты',url:'https://example.com/?project=light'}
+};
+const phase=document.getElementById('phase'), explain=document.getElementById('explain'), details=document.getElementById('details');
+let targetSeen=false, arReady=false, assetOk=false;
+function state(p,e,d){phase.textContent=p;explain.textContent=e;details.textContent=d;}
+window.addEventListener('error',e=>state('Ошибка JavaScript','Пришлите скриншот этой строки.',String(e.message||e.error)));
+window.addEventListener('unhandledrejection',e=>state('Ошибка запуска AR','Пришлите скриншот этой строки.',String(e.reason?.message||e.reason)));
+async function checkTarget(){
+ try{
+  const response=await fetch('./targets.mind?check='+Date.now(),{cache:'no-store'});
+  if(!response.ok)throw new Error('HTTP '+response.status);
+  const blob=await response.blob();
+  if(blob.size<1000)throw new Error('Файл слишком маленький ('+blob.size+' байт)');
+  assetOk=true;
+  state('Файл targets.mind доступен ('+Math.round(blob.size/1024)+' КБ)','Инициализация AR. Разрешите доступ к камере.','Файл загружен; ожидаем событие arReady');
+ }catch(err){state('Ошибка targets.mind','Проверьте имя файла и его расположение рядом с index.html.',String(err.message||err));}
+}
+checkTarget();
+const scene=document.getElementById('scene');
+scene.addEventListener('arReady',()=>{arReady=true;state('AR готов — ищем постер','Наведите камеру на ТОЧНО ТО ЖЕ изображение, из которого создан targets.mind.','arReady: да · targets.mind: '+(assetOk?'доступен':'проверяется'))});
+scene.addEventListener('arError',e=>state('Ошибка AR','Попробуйте открыть в обычном Safari или Chrome.',JSON.stringify(e.detail||{})));
+const target=document.getElementById('target');
+target.addEventListener('targetFound',()=>{targetSeen=true;state('ПОСТЕР НАЙДЕН ✓','Нажмите цветную метку, чтобы открыть проект.','targetFound: да')});
+target.addEventListener('targetLost',()=>{targetSeen=false;state('Постер потерян','Верните карту целиком в кадр, держите телефон ровно.','targetLost: да')});
+setTimeout(()=>{if(assetOk&&!arReady)state('Файл есть, но AR не сообщил о готовности','Проверьте подключение и попробуйте Safari/Chrome.','Нет события arReady за 20 секунд');},20000);
+setTimeout(()=>{if(arReady&&!targetSeen)state('AR готов, но карта не распознана','Проверьте, что постер совпадает с исходником для targets.mind; заполните им большую часть кадра.','arReady: да · targetFound: нет');},30000);
+const card=document.getElementById('card');
+document.querySelectorAll('[data-project]').forEach(el=>el.addEventListener('click',()=>{
+ const p=projects[el.dataset.project];document.getElementById('project-title').textContent=p.title;document.getElementById('project-description').textContent=p.description;
+ document.getElementById('project-link').href=p.url;card.style.display='block';
+}));
+document.getElementById('close').onclick=()=>card.style.display='none';
+</script>
+</body>
+</html>
