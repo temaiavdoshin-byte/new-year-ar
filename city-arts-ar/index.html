@@ -77,6 +77,8 @@ maskContext.putImageData(maskPixels,0,0);
 
 let scene, texture, plane, posterAnchor, overlayAnchor;
 let lostAt = null, lastFadeFrame = 0;
+let poseProbe, previousCorners = null, stableSince = null;
+const poseCorners = [[-.5,-1447/2174],[.5,-1447/2174],[.5,1447/2174],[-.5,1447/2174]];
 let mode = 'idle', tracking = false, startedAt = 0, lastFrame = -Infinity;
 let previousStage = '';
 
@@ -346,13 +348,42 @@ function resetAnimation() {
   if (texture) texture.needsUpdate = true;
 }
 
+function projectPoster() {
+  const camera = scene.camera;
+  const aspect = scene.canvas.clientWidth/scene.canvas.clientHeight;
+  const points = poseCorners.map(([x,y]) => {
+    poseProbe.set(x,y,0).applyMatrix4(posterAnchor.matrix).project(camera);
+    return [poseProbe.x*aspect*.5,poseProbe.y*.5,poseProbe.z];
+  });
+  return points.every(([x,y,z]) => Number.isFinite(x) && Number.isFinite(y) && z >= -1 && z <= 1)
+    ? points : null;
+}
+
+function pauseTracking(now, message) {
+  if (lostAt === null) lostAt = now;
+  replay.hidden = true;
+  status.textContent = message;
+}
+
 function updateOverlay(now) {
   const elapsed = Math.min(50, Math.max(0, now-lastFadeFrame));
   lastFadeFrame = now;
   const material = plane.material;
+  const corners = tracking ? projectPoster() : null;
+  const shift = corners && previousCorners
+    ? Math.max(...corners.map(([x,y],i) => Math.hypot(x-previousCorners[i][0],y-previousCorners[i][1])))
+    : Infinity;
+  if (shift > .018) stableSince = corners ? now : null;
+  const hadPose = previousCorners !== null;
+  previousCorners = corners;
+
+  // Reject a sudden screen-space jump before it reaches the visible overlay.
+  if (tracking && lostAt === null && (!corners || (hadPose && shift > .045))) {
+    pauseTracking(now,'Удерживайте постер в кадре');
+  }
   if (!tracking || lostAt !== null) {
     material.opacity = Math.max(0,material.opacity-elapsed/230);
-    if (tracking && material.opacity === 0) {
+    if (corners && material.opacity === 0 && now-stableSince >= 100) {
       startedAt += now-lostAt;
       lostAt = null;
       lastFrame = -Infinity;
@@ -363,9 +394,8 @@ function updateOverlay(now) {
     material.opacity = Math.min(1,material.opacity+elapsed/370);
   }
 
-  // MindAR hides its own anchor immediately. Hold the last pose through the fade,
-  // then apply the new pose while the overlay is still transparent.
-  if (tracking && lostAt === null) {
+  // Keep the last accepted pose during the fade and switch while transparent.
+  if (corners && lostAt === null) {
     overlayAnchor.matrix.copy(posterAnchor.matrix);
     overlayAnchor.matrixWorldNeedsUpdate = true;
   }
@@ -415,6 +445,7 @@ function initVisuals(poster) {
   plane = new THREE.Mesh(new THREE.PlaneGeometry(1,1447/1087),material);
   plane.position.z = .001;
   plane.renderOrder = 10;
+  poseProbe = new THREE.Vector3();
   posterAnchor = poster.object3D;
   overlayAnchor = new THREE.Group();
   overlayAnchor.matrixAutoUpdate = false;
@@ -491,9 +522,9 @@ async function startCamera() {
     });
     poster.addEventListener('targetLost',() => {
       tracking = false;
-      if (lostAt === null) lostAt = performance.now();
-      replay.hidden = true;
-      status.textContent = 'Верните весь постер в кадр';
+      previousCorners = null;
+      stableSince = null;
+      pauseTracking(performance.now(),'Верните весь постер в кадр');
     });
     start.hidden = true;
     demo.hidden = true;
