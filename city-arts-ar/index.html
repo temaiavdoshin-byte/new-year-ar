@@ -78,7 +78,7 @@ maskContext.putImageData(maskPixels,0,0);
 let scene, texture, plane, posterAnchor, overlayAnchor;
 let lostAt = null, lastFadeFrame = 0;
 let poseProbe, measuredPosition, measuredRotation, measuredScale;
-let previousCorners = null, stableSince = null;
+let previousCorners = null, stableSince = null, turnMotion = null;
 const poseCorners = [[-.5,-1447/2174],[.5,-1447/2174],[.5,1447/2174],[-.5,1447/2174]];
 let mode = 'idle', tracking = false, startedAt = 0, lastFrame = -Infinity;
 let previousStage = '';
@@ -463,12 +463,27 @@ function cornerShift(a,b) {
     : Infinity;
 }
 
-function applyOverlayPose(corners,elapsed,snap) {
+function followsSteadyTurn(corners,shift,now) {
+  if (turnMotion && now-turnMotion.at > 95) turnMotion = null;
+  // Display frames can repeat the same tracking sample. Count only meaningful motion.
+  if (shift > .0005) {
+    const delta = corners.flatMap(([x,y],i) => [x-previousCorners[i][0],y-previousCorners[i][1]]);
+    const length = Math.hypot(...delta);
+    const alignment = turnMotion
+      ? delta.reduce((dot,value,i) => dot+value*turnMotion.delta[i],0)/(length*turnMotion.length)
+      : 0;
+    turnMotion = {delta,length,at:now,count:alignment > .72 ? turnMotion.count+1 : 1};
+  }
+  return (turnMotion?.count ?? 0) >= 3;
+}
+
+function applyOverlayPose(corners,elapsed,snap,steadyTurn = false) {
   const anchor = overlayAnchor;
   posterAnchor.matrix.decompose(measuredPosition,measuredRotation,measuredScale);
-  // Ease tiny corrections over several frames and follow deliberate motion faster.
+  // Keep the idle damping for tiny gaps, then catch up quickly on a steady turn.
   const gap = snap ? 0 : cornerShift(corners,projectPoster(anchor.matrix));
-  const timeConstant = 115-88*ease((gap-.0025)/.024);
+  const damping = 115-88*ease((gap-.0025)/.024);
+  const timeConstant = steadyTurn ? Math.min(35,damping) : damping;
   const blend = snap ? 1 : 1-Math.exp(-elapsed/timeConstant);
   anchor.position.lerp(measuredPosition,blend);
   anchor.quaternion.slerp(measuredRotation,blend);
@@ -491,7 +506,6 @@ function updateOverlay(now) {
   const shift = cornerShift(corners,previousCorners);
   if (shift > .018) stableSince = corners ? now : null;
   const hadPose = previousCorners !== null;
-  previousCorners = corners;
 
   // Reject a sudden screen-space jump before it reaches the visible overlay.
   if (tracking && lostAt === null && (!corners || (hadPose && shift > .045))) {
@@ -511,9 +525,13 @@ function updateOverlay(now) {
   }
 
   // Keep the last accepted pose during the fade and switch while transparent.
+  if (!corners || lostAt !== null || !hadPose || wasHidden) turnMotion = null;
   if (corners && lostAt === null) {
-    applyOverlayPose(corners,elapsed,wasHidden || material.opacity === 0);
+    const snap = wasHidden || material.opacity === 0;
+    const steadyTurn = !snap && hadPose && followsSteadyTurn(corners,shift,now);
+    applyOverlayPose(corners,elapsed,snap,steadyTurn);
   }
+  previousCorners = corners;
   overlayAnchor.visible = material.opacity > 0;
 }
 
