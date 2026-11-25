@@ -52,6 +52,10 @@ const W = 638, H = 850;
 ink.width = W;
 ink.height = H;
 const ctx = ink.getContext('2d');
+const winterScenery = new Image();
+winterScenery.src = './winter-scenery.webp';
+const sceneryReady = winterScenery.decode();
+sceneryReady.catch(() => {});
 const reducedMotion = matchMedia('(prefers-reduced-motion: reduce)').matches;
 const clamp = n => Math.max(0, Math.min(1, n));
 const ease = n => { const x = clamp(n); return x * x * (3 - 2 * x); };
@@ -123,8 +127,8 @@ const snowbanks = [
   [254,660,20,9],[212,593,30,10],[261,602,22,7],[157,558,24,8],
   [183,527,22,7],[244,548,26,8],[387,546,21,7],[455,524,26,8],
   [434,584,45,12],[478,596,25,8],[529,621,43,10],[590,607,37,10],
-  [398,652,29,9],[461,649,47,10],[604,635,33,9],[253,700,31,10],
-  [418,702,40,11],[213,727,40,8],[463,729,47,9]
+  [409,654,25,9],[461,649,44,10],[604,629,28,9],[272,683,21,9],
+  [402,685,24,10],[273,710,17,8],[399,713,18,9]
 ];
 const lanterns = [
   [315,371,19],[350,372,19],[296,422,23],[369,422,23],
@@ -144,30 +148,36 @@ const bursts = [
   [482,95,56,15.25,'255,202,116']
 ];
 
+// Source rectangles in winter-scenery.webp, in atlas order.
+const treeSprites = [[2,2,196,284],[213,2,150,284],[424,2,170,284]];
+const driftSprites = [[2,299,152,30],[162,299,152,57],[322,299,152,54],[482,299,152,39]];
+
+function groundShadow(x,y,w,h,opacity) {
+  ctx.save();
+  ctx.translate(x,y);
+  ctx.scale(w,h);
+  const shade = ctx.createRadialGradient(0,0,.08,0,0,1);
+  shade.addColorStop(0,'rgba(14,17,32,' + opacity + ')');
+  shade.addColorStop(1,'rgba(14,17,32,0)');
+  ctx.fillStyle = shade;
+  ctx.fillRect(-1,-1,2,2);
+  ctx.restore();
+}
+
 function drawSnowbanks(t) {
   snowbanks.forEach(([x,y,w,h],i) => {
     const appear = ease((t-.65-(i%5)*.27)/1.8);
     if (!appear) return;
+    const [sx,sy,sw,sh] = driftSprites[(i*3+Math.floor(i/4))%driftSprites.length];
+    const height = Math.min(h*2.1,w*2*sh/sw) * (.76+.24*appear);
+    const angle = Math.max(-.24,Math.min(.24,(x-W/2)*-.0012));
     ctx.save();
     ctx.translate(x,y);
-    ctx.scale(1,.38+.62*appear);
-    ctx.globalAlpha = appear * .92;
-    ctx.fillStyle = '#2b374e';
-    ctx.beginPath();
-    ctx.ellipse(0,h*.32,w,h*.62,0,0,Math.PI*2);
-    ctx.fill();
-    const snow = ctx.createLinearGradient(0,-h,0,h);
-    snow.addColorStop(0,'#f2f7ff');
-    snow.addColorStop(.5,'#c2d8eb');
-    snow.addColorStop(1,'#728ba8');
-    ctx.fillStyle = snow;
-    ctx.beginPath();
-    ctx.moveTo(-w,1);
-    ctx.bezierCurveTo(-w*.64,-h*.5,-w*.47,-h*1.3,-w*.14,-h*.79);
-    ctx.bezierCurveTo(w*.1,-h*.55,w*.19,-h*1.26,w*.49,-h*.62);
-    ctx.quadraticCurveTo(w*.74,-h*.26,w,1);
-    ctx.quadraticCurveTo(w*.05,h*.9,-w,1);
-    ctx.fill();
+    ctx.rotate(angle);
+    groundShadow(0,1,w*1.18,h*.82,appear*.62);
+    if (i%3===1) ctx.scale(-1,1);
+    ctx.globalAlpha = appear * .96;
+    ctx.drawImage(winterScenery,sx,sy,sw,sh,-w,-height*.86,w*2,height);
     ctx.restore();
   });
 }
@@ -200,65 +210,20 @@ function drawLanterns(t) {
 
 function drawTree(x,y,h,appear,motion,i) {
   if (!appear) return;
+  const [sx,sy,sw,sh] = treeSprites[[1,2,0,1,0,1,2,0][i]];
+  const height = h*(.82+.18*appear);
+  const width = height*sw/sh;
+  groundShadow(x+width*.08,y,width*.72,h*.115,appear*.79);
+  glow(x,y-height*.33,width*.88,appear*.19,'255,164,62');
   ctx.save();
-  ctx.translate(x,y);
-  ctx.scale(appear,appear);
-  ctx.globalAlpha = Math.min(1,appear*1.4);
-  const w = h*.29;
-  ctx.fillStyle = '#243044b0';
-  ctx.beginPath();
-  ctx.ellipse(0,1,w*1.05,h*.075,0,0,Math.PI*2);
-  ctx.fill();
-  ctx.fillStyle = '#594034';
-  ctx.fillRect(-h*.044,-h*.22,h*.088,h*.22);
-  const needles = ctx.createLinearGradient(-w,0,w,0);
-  needles.addColorStop(0,'#0a2832');
-  needles.addColorStop(.41,'#297366');
-  needles.addColorStop(1,'#0c392f');
-  for (let tier=0;tier<4;tier++) {
-    const base = -h*(.1+tier*.15);
-    const width = w*(1-tier*.2);
-    ctx.fillStyle = needles;
-    ctx.beginPath();
-    ctx.moveTo(0,base-h*.43);
-    ctx.bezierCurveTo(-width*.24,base-h*.20,-width*.73,base-h*.12,-width,base);
-    ctx.quadraticCurveTo(0,base+h*.095,width,base);
-    ctx.bezierCurveTo(width*.79,base-h*.14,width*.29,base-h*.18,0,base-h*.43);
-    ctx.fill();
-    ctx.strokeStyle = '#d4e6ed';
-    ctx.lineWidth = h*.023;
-    ctx.beginPath();
-    ctx.moveTo(-width*.84,base);
-    ctx.quadraticCurveTo(-width*.44,base+h*.043,-width*.08,base+h*.036);
-    ctx.moveTo(width*.33,base+h*.02);
-    ctx.quadraticCurveTo(width*.61,base+h*.005,width*.81,base-h*.016);
-    ctx.stroke();
-  }
-  const colors = ['255,210,110','255,107,127','130,231,255','255,242,179'];
-  for (let row=0;row<4;row++) for (let j=0;j<5-row;j++) {
-    const bx = (j-(4-row)/2)*w*.37;
-    const by = -h*(.17+row*.15) + Math.abs(bx)*.21;
-    const color = colors[(row+j+i)%colors.length];
-    const power = .66+.21*Math.sin(motion*2.7+i+j*1.5);
-    glow(bx,by,h*.10,power,color);
-    ctx.fillStyle = 'rgb(' + color + ')';
-    ctx.beginPath();
-    ctx.arc(bx,by,h*.023,0,Math.PI*2);
-    ctx.fill();
-  }
-  const starY = -h*.995;
-  glow(0,starY,h*.23,.82,'255,191,78');
-  ctx.fillStyle = '#fff1ac';
-  ctx.beginPath();
-  for (let j=0;j<10;j++) {
-    const angle = j*Math.PI/5-Math.PI/2;
-    const r = h*(j%2 ? .037 : .085);
-    const sx = Math.cos(angle)*r, sy = starY+Math.sin(angle)*r;
-    if (j) ctx.lineTo(sx,sy);
-    else ctx.moveTo(sx,sy);
-  }
-  ctx.closePath();
-  ctx.fill();
+  ctx.globalAlpha = appear;
+  ctx.drawImage(winterScenery,sx,sy,sw,sh,x-width/2,y-height,width,height);
+  const lights = [[-.2,.31],[.15,.4],[-.12,.58],[.22,.64],[-.27,.73],[.03,.78]];
+  lights.forEach(([dx,dy],j) => {
+    const twinkle = .24+.34*Math.pow(Math.max(0,Math.sin(motion*2.4+i+j*1.86)),3);
+    glow(x+dx*width,y-height*(1-dy),height*.078,twinkle,'255,198,103');
+  });
+  glow(x,y-height*.976,height*.17,.41+.16*Math.sin(motion*2+i),'255,203,101');
   ctx.restore();
 }
 
@@ -469,6 +434,7 @@ async function startCamera() {
     if (!navigator.mediaDevices?.getUserMedia) {
       throw new Error('Откройте страницу по HTTPS в Safari и разрешите доступ к камере.');
     }
+    await sceneryReady.catch(() => { throw new Error('Не удалось загрузить winter-scenery.webp. Проверьте файлы публикации.'); });
     const response = await fetch('./targets.mind');
     if (!response.ok || (await response.arrayBuffer()).byteLength < 1000) {
       throw new Error('Не удалось загрузить targets.mind. Проверьте файлы публикации.');
@@ -537,8 +503,8 @@ start.addEventListener('click',() => {
 demo.addEventListener('click',async () => {
   const img = preview.querySelector('img');
   img.src = './3_g.png';
-  try { await img.decode(); }
-  catch { status.textContent = 'Не удалось открыть 3_g.png'; return; }
+  try { await Promise.all([img.decode(),sceneryReady]); }
+  catch { status.textContent = 'Не удалось открыть постер или зимние декорации'; return; }
   if (mode !== 'idle' && mode !== 'failed') return;
   preview.dataset.previousMode = mode;
   mode = 'preview';
