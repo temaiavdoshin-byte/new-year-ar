@@ -76,7 +76,8 @@ maskContext.putImageData(maskPixels,0,0);
 
 
 let scene, texture, plane, posterAnchor, overlayAnchor;
-let lostAt = null, lastFadeFrame = 0;
+const restartAfterMissingMs = 3000;
+let lostAt = null, targetMissingSince = null, restartOnRecovery = false, lastFadeFrame = 0;
 let poseProbe, measuredPosition, measuredRotation, measuredScale;
 let previousCorners = null, stableSince = null, turnMotion = null;
 const poseCorners = [[-.5,-1447/2174],[.5,-1447/2174],[.5,1447/2174],[-.5,1447/2174]];
@@ -514,10 +515,15 @@ function updateOverlay(now) {
   if (!tracking || lostAt !== null) {
     material.opacity = Math.max(0,material.opacity-elapsed/230);
     if (corners && material.opacity === 0 && now-stableSince >= 85) {
-      startedAt += now-lostAt;
+      if (restartOnRecovery) {
+        resetAnimation();
+      } else {
+        startedAt += now-lostAt;
+        lastFrame = -Infinity;
+        previousStage = '';
+      }
+      restartOnRecovery = false;
       lostAt = null;
-      lastFrame = -Infinity;
-      previousStage = '';
       replay.hidden = false;
     }
   } else {
@@ -649,6 +655,10 @@ async function startCamera() {
       start.textContent = 'Перезапустить';
     });
     poster.addEventListener('targetFound',() => {
+      if (targetMissingSince !== null) {
+        restartOnRecovery ||= performance.now()-targetMissingSince >= restartAfterMissingMs;
+        targetMissingSince = null;
+      }
       tracking = true;
       ready();
       if (lostAt === null) {
@@ -657,10 +667,12 @@ async function startCamera() {
       }
     });
     poster.addEventListener('targetLost',() => {
+      const now = performance.now();
+      targetMissingSince ??= now;
       tracking = false;
       previousCorners = null;
       stableSince = null;
-      pauseTracking(performance.now(),'Верните весь постер в кадр');
+      pauseTracking(now,'Верните весь постер в кадр');
     });
     start.hidden = true;
     demo.hidden = true;
