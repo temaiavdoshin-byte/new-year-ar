@@ -60,6 +60,21 @@ const reducedMotion = matchMedia('(prefers-reduced-motion: reduce)').matches;
 const clamp = n => Math.max(0, Math.min(1, n));
 const ease = n => { const x = clamp(n); return x * x * (3 - 2 * x); };
 
+// Precompute the edge falloff once. Canvas coordinates match the tracked poster.
+const edgeMask = document.createElement('canvas');
+edgeMask.width = W;
+edgeMask.height = H;
+const maskContext = edgeMask.getContext('2d');
+const maskPixels = maskContext.createImageData(W,H);
+for (let y=0;y<H;y++) {
+  for (let x=0;x<W;x++) {
+    const distance = Math.min(x,W-1-x,y,H-1-y);
+    maskPixels.data[(y*W+x)*4+3] = Math.round(255*ease((distance-2)/30));
+  }
+}
+maskContext.putImageData(maskPixels,0,0);
+
+
 let scene, texture, plane;
 let mode = 'idle', tracking = false, startedAt = 0, lastFrame = -Infinity;
 let previousStage = '';
@@ -315,6 +330,11 @@ function paint(t) {
     }
     drawFireworks(t);
   }
+  if (mode === 'camera') {
+    ctx.globalCompositeOperation = 'destination-in';
+    ctx.drawImage(edgeMask,0,0);
+    ctx.globalCompositeOperation = 'source-over';
+  }
 }
 
 function resetAnimation() {
@@ -398,7 +418,12 @@ async function startCamera() {
 
     scene = document.createElement('a-scene');
     scene.id = 'ar-scene';
-    scene.setAttribute('mindar-image','imageTargetSrc: ./targets.mind; autoStart: true; uiLoading: no; uiScanning: no; uiError: no;');
+    // Reduce the filter's sensitivity to small pose changes and brief dropped frames.
+    scene.setAttribute('mindar-image', [
+      'imageTargetSrc: ./targets.mind', 'autoStart: true',
+      'uiLoading: no', 'uiScanning: no', 'uiError: no',
+      'filterMinCF: 0.001', 'filterBeta: 75', 'missTolerance: 7'
+    ].join('; '));
     scene.setAttribute('embedded','');
     scene.setAttribute('color-space','sRGB');
     scene.setAttribute('renderer','colorManagement: true; alpha: true; antialias: true;');
