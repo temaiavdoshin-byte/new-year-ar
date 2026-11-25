@@ -75,29 +75,10 @@ const windows = [
   [29,315,6,11],[44,314,6,12],[55,312,6,12],[20,402,6,10],[32,406,6,10],
   [572,341,6,16],[583,344,6,17],[594,348,6,16],[606,351,6,15]
 ];
-const paths = [
-  [[322,314],[321,342],[319,369],[316,394],[311,418]],
-  [[345,319],[347,344],[350,373],[354,400],[360,425]],
-  [[307,508],[303,535],[300,571],[296,616],[288,662],[272,708],[250,747]],
-  [[360,510],[366,539],[373,575],[378,620],[388,665],[405,710],[426,748]],
-  [[307,429],[269,425],[231,433],[200,447],[181,466],[176,485],[186,505],[208,520],[245,531],[285,536],[330,537],[378,535],[424,526],[461,510],[484,489],[487,473],[469,454],[441,441],[401,431],[360,428]],
-  [[191,469],[171,451],[151,435],[132,423]],
-  [[467,451],[492,437],[517,430],[542,431],[561,440],[582,446]],
-  [[22,619],[68,634],[112,644],[152,655],[194,667],[235,681],[264,700]],
-  [[405,701],[438,681],[482,667],[527,651],[577,639],[637,624]]
-];
 const cubes = [
   { x:359,y:107,r:69,outline:[[316,78],[359,60],[402,76],[402,131],[359,145],[315,132]] },
   { x:333,y:455,r:55,outline:[[305,421],[361,428],[362,484],[305,478]] }
 ];
-const routes = paths.map(points => {
-  let length = 0;
-  const samples = points.map(([x,y], i) => {
-    if (i) length += Math.hypot(x - points[i-1][0], y - points[i-1][1]);
-    return {x,y,d:length};
-  });
-  return {samples,length};
-});
 const stars = Array.from({length:32}, (_, i) => ({
   x: 12 + ((i * 101 + 47) % 611),
   y: 11 + ((i * 43) % 116),
@@ -112,14 +93,6 @@ function glow(x, y, radius, strength, color = '255,181,78') {
   gradient.addColorStop(1, 'rgba(' + color + ',0)');
   ctx.fillStyle = gradient;
   ctx.fillRect(x-radius,y-radius,2*radius,2*radius);
-}
-
-function pointAt({samples,length}, progress) {
-  const d = progress * length;
-  const i = samples.findIndex((p, index) => index > 0 && p.d >= d);
-  const a = samples[i-1], b = samples[i];
-  const mix = (d-a.d)/(b.d-a.d);
-  return [a.x+(b.x-a.x)*mix, a.y+(b.y-a.y)*mix];
 }
 
 const snowbanks = [
@@ -260,7 +233,6 @@ function drawFireworks(t) {
 function paint(t) {
   const night = ease(t / 4);
   const motion = reducedMotion ? 0 : t;
-  const routeLight = ease((t-3.8)/2.1);
   const pulse = ease((t-7.8)/1.2);
   const finale = (t-12)/3;
   ctx.globalCompositeOperation = 'source-over';
@@ -289,24 +261,6 @@ function paint(t) {
     ctx.fillRect(x,y,w,h);
     ctx.fillStyle = 'rgba(255,248,213,' + (.72*strength) + ')';
     ctx.fillRect(x+1,y+1,Math.max(1,w-3),Math.max(1,h-4));
-  });
-
-  if (routeLight) routes.forEach((route,i) => {
-    ctx.beginPath();
-    route.samples.forEach(({x,y},j) => j ? ctx.lineTo(x,y) : ctx.moveTo(x,y));
-    ctx.lineJoin = 'round';
-    ctx.lineCap = 'round';
-    ctx.lineWidth = 6;
-    ctx.strokeStyle = 'rgba(255,73,31,' + .23*routeLight + ')';
-    ctx.stroke();
-    ctx.lineWidth = 1.7;
-    ctx.strokeStyle = 'rgba(255,189,99,' + .63*routeLight + ')';
-    ctx.stroke();
-    for (let j=9;j>=0;j--) {
-      const u = ((motion*.32+i*.23-j*.017)%1+1)%1;
-      const [x,y] = pointAt(route,u);
-      glow(x,y,j ? 9 : 19,routeLight*(.87-j*.078),j ? '255,91,49' : '255,226,142');
-    }
   });
 
   if (pulse) cubes.forEach(({x,y,r,outline},i) => {
