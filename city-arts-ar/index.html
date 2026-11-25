@@ -513,7 +513,7 @@ function updateOverlay(now) {
   }
   if (!tracking || lostAt !== null) {
     material.opacity = Math.max(0,material.opacity-elapsed/230);
-    if (corners && material.opacity === 0 && now-stableSince >= 100) {
+    if (corners && material.opacity === 0 && now-stableSince >= 85) {
       startedAt += now-lostAt;
       lostAt = null;
       lastFrame = -Infinity;
@@ -521,7 +521,7 @@ function updateOverlay(now) {
       replay.hidden = false;
     }
   } else {
-    material.opacity = Math.min(1,material.opacity+elapsed/370);
+    material.opacity = Math.min(1,material.opacity+elapsed/295);
   }
 
   // Keep the last accepted pose during the fade and switch while transparent.
