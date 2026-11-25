@@ -75,7 +75,8 @@ for (let y=0;y<H;y++) {
 maskContext.putImageData(maskPixels,0,0);
 
 
-let scene, texture, plane;
+let scene, texture, plane, posterAnchor, overlayAnchor;
+let lostAt = null, lastFadeFrame = 0;
 let mode = 'idle', tracking = false, startedAt = 0, lastFrame = -Infinity;
 let previousStage = '';
 
@@ -345,9 +346,36 @@ function resetAnimation() {
   if (texture) texture.needsUpdate = true;
 }
 
+function updateOverlay(now) {
+  const elapsed = Math.min(50, Math.max(0, now-lastFadeFrame));
+  lastFadeFrame = now;
+  const material = plane.material;
+  if (!tracking || lostAt !== null) {
+    material.opacity = Math.max(0,material.opacity-elapsed/230);
+    if (tracking && material.opacity === 0) {
+      startedAt += now-lostAt;
+      lostAt = null;
+      lastFrame = -Infinity;
+      previousStage = '';
+      replay.hidden = false;
+    }
+  } else {
+    material.opacity = Math.min(1,material.opacity+elapsed/370);
+  }
+
+  // MindAR hides its own anchor immediately. Hold the last pose through the fade,
+  // then apply the new pose while the overlay is still transparent.
+  if (tracking && lostAt === null) {
+    overlayAnchor.matrix.copy(posterAnchor.matrix);
+    overlayAnchor.matrixWorldNeedsUpdate = true;
+  }
+  overlayAnchor.visible = material.opacity > 0;
+}
+
 function frame(now) {
   requestAnimationFrame(frame);
-  if (mode !== 'preview' && !tracking) return;
+  if (mode === 'camera' && plane) updateOverlay(now);
+  if (mode !== 'preview' && (!tracking || lostAt !== null)) return;
   if (now-lastFrame < 1000/30) return;
   lastFrame = now;
   const t = Math.max(0,(now-startedAt)/1000);
@@ -381,13 +409,18 @@ function initVisuals(poster) {
   texture.minFilter = THREE.LinearFilter;
   texture.generateMipmaps = false;
   const material = new THREE.MeshBasicMaterial({
-    map:texture,transparent:true,depthWrite:false,side:THREE.DoubleSide,toneMapped:false
+    map:texture,transparent:true,opacity:0,depthWrite:false,side:THREE.DoubleSide,toneMapped:false
   });
   // MindAR expresses the width of a target as one unit.
   plane = new THREE.Mesh(new THREE.PlaneGeometry(1,1447/1087),material);
   plane.position.z = .001;
   plane.renderOrder = 10;
-  poster.object3D.add(plane);
+  posterAnchor = poster.object3D;
+  overlayAnchor = new THREE.Group();
+  overlayAnchor.matrixAutoUpdate = false;
+  overlayAnchor.visible = false;
+  overlayAnchor.add(plane);
+  scene.object3D.add(overlayAnchor);
 }
 
 const loadScript = src => new Promise((resolve,reject) => {
@@ -451,11 +484,14 @@ async function startCamera() {
     poster.addEventListener('targetFound',() => {
       tracking = true;
       ready();
-      resetAnimation();
-      replay.hidden = false;
+      if (lostAt === null) {
+        resetAnimation();
+        replay.hidden = false;
+      }
     });
     poster.addEventListener('targetLost',() => {
       tracking = false;
+      if (lostAt === null) lostAt = performance.now();
       replay.hidden = true;
       status.textContent = 'Верните весь постер в кадр';
     });
