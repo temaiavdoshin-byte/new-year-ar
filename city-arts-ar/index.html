@@ -1,0 +1,369 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#15142a">
+<title>Город искусств · Волшебная ночь</title>
+<style>
+* { box-sizing: border-box }
+html,body { width:100%;height:100%;margin:0;overflow:hidden;color:#fff;font-family:system-ui,sans-serif }
+body { background:transparent!important }
+#mount { position:fixed;inset:0;width:100vw;height:100dvh }
+body>video,video { position:fixed!important;top:0!important;left:0!important;width:100vw!important;height:100dvh!important;object-fit:cover!important;z-index:0!important;opacity:1!important;visibility:visible!important }
+a-scene,#ar-scene { position:fixed!important;inset:0!important;width:100vw!important;height:100dvh!important;z-index:1!important;background:transparent!important }
+a-scene canvas,canvas.a-canvas { background:transparent!important }
+.a-enter-vr,.a-enter-ar,.a-orientation-modal { display:none!important }
+[hidden] { display:none!important }
+#ui { position:fixed;inset:0;z-index:20;pointer-events:none;display:flex;flex-direction:column;align-items:center;justify-content:space-between;padding:max(16px,env(safe-area-inset-top)) 16px max(20px,env(safe-area-inset-bottom));text-align:center }
+#status { background:#171429eb;border:1px solid #9c795c;padding:10px 16px;border-radius:15px;max-width:36ch }
+#actions { display:flex;flex-wrap:wrap;justify-content:center;gap:8px }
+button { pointer-events:auto;touch-action:manipulation;border:1px solid #d3ab7e;border-radius:12px;padding:10px 14px;background:#422a40;color:white;font:inherit;cursor:pointer }
+#preview { position:fixed;inset:0;z-index:10;display:grid;place-items:center;background:#15142a;padding:58px 8px 66px }
+#preview figure { position:relative;margin:0;width:min(calc(100vw - 16px), calc((100dvh - 124px) * 1087 / 1447));aspect-ratio:1087/1447 }
+#preview img,#preview canvas { width:100%;height:100%;object-fit:contain;display:block }
+#preview canvas { position:absolute;inset:0 }
+</style>
+</head>
+<body>
+<div id="mount"></div>
+<div id="preview" hidden><figure><img alt="Постер «Город искусств»" width="1087" height="1447"></figure></div>
+<div id="ui">
+  <div id="status" role="status">Город искусств · Волшебная ночь</div>
+  <div id="actions">
+    <button id="start">Включить камеру</button>
+    <button id="demo">Смотреть без камеры</button>
+    <button id="replay" hidden>Повторить</button>
+    <button id="back" hidden>Закрыть просмотр</button>
+  </div>
+</div>
+<script>
+'use strict';
+
+const status = document.querySelector('#status');
+const start = document.querySelector('#start');
+const demo = document.querySelector('#demo');
+const replay = document.querySelector('#replay');
+const back = document.querySelector('#back');
+const preview = document.querySelector('#preview');
+const mount = document.querySelector('#mount');
+const ink = document.createElement('canvas');
+const W = 638, H = 850;
+ink.width = W;
+ink.height = H;
+const ctx = ink.getContext('2d');
+const reducedMotion = matchMedia('(prefers-reduced-motion: reduce)').matches;
+const clamp = n => Math.max(0, Math.min(1, n));
+const ease = n => { const x = clamp(n); return x * x * (3 - 2 * x); };
+
+let scene, texture, plane;
+let mode = 'idle', tracking = false, startedAt = 0, lastFrame = -Infinity;
+let previousStage = '';
+
+const windows = [
+  [228,167,7,15],[238,166,5,15],[247,163,6,17],[228,194,7,14],[239,194,6,14],[251,193,5,15],
+  [224,224,7,12],[236,225,7,13],[247,222,6,13],
+  [276,218,8,18],[288,220,8,17],[300,222,8,16],[312,225,8,16],[324,228,8,16],
+  [337,231,8,16],[350,232,9,17],[362,232,8,16],[376,231,8,16],
+  [406,221,7,15],[416,217,7,16],[430,209,7,16],[442,203,6,16],[456,196,6,16],
+  [426,186,6,14],[440,181,6,14],[454,174,5,14],[458,151,5,14],
+  [532,239,6,10],[544,240,6,10],[566,235,6,10],[579,231,5,10],[591,226,5,10],
+  [29,315,6,11],[44,314,6,12],[55,312,6,12],[20,402,6,10],[32,406,6,10],
+  [572,341,6,16],[583,344,6,17],[594,348,6,16],[606,351,6,15]
+];
+const paths = [
+  [[322,314],[321,342],[319,369],[316,394],[311,418]],
+  [[345,319],[347,344],[350,373],[354,400],[360,425]],
+  [[307,508],[303,535],[300,571],[296,616],[288,662],[272,708],[250,747]],
+  [[360,510],[366,539],[373,575],[378,620],[388,665],[405,710],[426,748]],
+  [[307,429],[269,425],[231,433],[200,447],[181,466],[176,485],[186,505],[208,520],[245,531],[285,536],[330,537],[378,535],[424,526],[461,510],[484,489],[487,473],[469,454],[441,441],[401,431],[360,428]],
+  [[191,469],[171,451],[151,435],[132,423]],
+  [[467,451],[492,437],[517,430],[542,431],[561,440],[582,446]],
+  [[22,619],[68,634],[112,644],[152,655],[194,667],[235,681],[264,700]],
+  [[405,701],[438,681],[482,667],[527,651],[577,639],[637,624]]
+];
+const cubes = [
+  { x:359,y:107,r:69,outline:[[316,78],[359,60],[402,76],[402,131],[359,145],[315,132]] },
+  { x:333,y:455,r:55,outline:[[305,421],[361,428],[362,484],[305,478]] }
+];
+const routes = paths.map(points => {
+  let length = 0;
+  const samples = points.map(([x,y], i) => {
+    if (i) length += Math.hypot(x - points[i-1][0], y - points[i-1][1]);
+    return {x,y,d:length};
+  });
+  return {samples,length};
+});
+const stars = Array.from({length:32}, (_, i) => ({
+  x: 12 + ((i * 101 + 47) % 611),
+  y: 11 + ((i * 43) % 116),
+  phase: i * 2.41
+})).filter(({x,y}) => x < 303 || x > 414 || y < 49);
+
+function glow(x, y, radius, strength, color = '255,181,78') {
+  if (strength <= 0) return;
+  const gradient = ctx.createRadialGradient(x,y,0,x,y,radius);
+  gradient.addColorStop(0, 'rgba(' + color + ',' + clamp(strength) + ')');
+  gradient.addColorStop(.44, 'rgba(' + color + ',' + clamp(strength * .34) + ')');
+  gradient.addColorStop(1, 'rgba(' + color + ',0)');
+  ctx.fillStyle = gradient;
+  ctx.fillRect(x-radius,y-radius,2*radius,2*radius);
+}
+
+function pointAt({samples,length}, progress) {
+  const d = progress * length;
+  const i = samples.findIndex((p, index) => index > 0 && p.d >= d);
+  const a = samples[i-1], b = samples[i];
+  const mix = (d-a.d)/(b.d-a.d);
+  return [a.x+(b.x-a.x)*mix, a.y+(b.y-a.y)*mix];
+}
+
+function paint(t) {
+  const night = ease(t / 4);
+  const motion = reducedMotion ? 0 : t;
+  const routeLight = ease((t-3.8)/2.1);
+  const pulse = ease((t-7.8)/1.2);
+  const finale = (t-12)/3;
+  ctx.globalCompositeOperation = 'source-over';
+  ctx.clearRect(0,0,W,H);
+  const dusk = ctx.createLinearGradient(0,0,0,H);
+  dusk.addColorStop(0, 'rgba(12,18,58,' + (.73*night) + ')');
+  dusk.addColorStop(.19, 'rgba(15,18,55,' + (.55*night) + ')');
+  dusk.addColorStop(.58, 'rgba(17,15,49,' + (.46*night) + ')');
+  dusk.addColorStop(1, 'rgba(7,11,31,' + (.56*night) + ')');
+  ctx.fillStyle = dusk;
+  ctx.fillRect(0,0,W,H);
+  ctx.globalCompositeOperation = 'screen';
+
+  stars.forEach(({x,y,phase}) => {
+    const brightness = night * (.48 + .28 * Math.sin(motion*1.7+phase));
+    glow(x,y,4,brightness,'172,199,255');
+    ctx.fillStyle = 'rgba(224,232,255,' + brightness + ')';
+    ctx.fillRect(x,y,1.2,1.2);
+  });
+  windows.forEach(([x,y,w,h], i) => {
+    const strength = ease((t - .9 - ((i*17)%37)*.105)/.65);
+    if (!strength) return;
+    glow(x+w/2,y+h/2,17,strength*.48);
+    ctx.fillStyle = 'rgba(255,220,147,' + (.57*strength) + ')';
+    ctx.fillRect(x,y,w,h);
+    ctx.fillStyle = 'rgba(255,248,213,' + (.72*strength) + ')';
+    ctx.fillRect(x+1,y+1,Math.max(1,w-3),Math.max(1,h-4));
+  });
+
+  if (routeLight) routes.forEach((route,i) => {
+    ctx.beginPath();
+    route.samples.forEach(({x,y},j) => j ? ctx.lineTo(x,y) : ctx.moveTo(x,y));
+    ctx.lineJoin = 'round';
+    ctx.lineCap = 'round';
+    ctx.lineWidth = 6;
+    ctx.strokeStyle = 'rgba(255,73,31,' + .23*routeLight + ')';
+    ctx.stroke();
+    ctx.lineWidth = 1.7;
+    ctx.strokeStyle = 'rgba(255,189,99,' + .63*routeLight + ')';
+    ctx.stroke();
+    for (let j=9;j>=0;j--) {
+      const u = ((motion*.32+i*.23-j*.017)%1+1)%1;
+      const [x,y] = pointAt(route,u);
+      glow(x,y,j ? 9 : 19,routeLight*(.87-j*.078),j ? '255,91,49' : '255,226,142');
+    }
+  });
+
+  if (pulse) cubes.forEach(({x,y,r,outline},i) => {
+    const wave = .46+.26*Math.sin(motion*4.3-i*.85);
+    const level = pulse * (t < 12 ? wave : .34+.19*wave);
+    glow(x,y,r,level*.78,'255,45,33');
+    ctx.beginPath();
+    outline.forEach(([px,py],j) => j ? ctx.lineTo(px,py) : ctx.moveTo(px,py));
+    ctx.closePath();
+    ctx.fillStyle = 'rgba(255,73,33,' + level*.32 + ')';
+    ctx.fill();
+    ctx.lineWidth = 2.4;
+    ctx.strokeStyle = 'rgba(255,183,110,' + level + ')';
+    ctx.stroke();
+    if (!reducedMotion) for (let j=0;j<9;j++) {
+      const life = ((t-7.8)*.55+j*.137)%1;
+      glow(x+Math.sin(j*2.4)*life*52,y-life*77,5,(1-life)*level,'255,225,136');
+    }
+  });
+
+  if (!reducedMotion && finale > 0 && finale < 1) {
+    const radius = 18+finale*565;
+    const intensity = Math.sin(Math.PI*finale)**.75;
+    ctx.save();
+    ctx.translate(333,484);
+    ctx.scale(1,.65);
+    for (let i=0;i<3;i++) {
+      ctx.beginPath();
+      ctx.arc(0,0,Math.max(1,radius-i*21),0,Math.PI*2);
+      ctx.lineWidth = 7-i*2;
+      ctx.shadowColor = '#ffbf53';
+      ctx.shadowBlur = 24;
+      ctx.strokeStyle = 'rgba(255,216,137,' + (intensity*(.91-i*.25)) + ')';
+      ctx.stroke();
+    }
+    ctx.restore();
+    glow(333,484,170+finale*120,intensity*.48,'255,207,108');
+  }
+  ctx.globalCompositeOperation = 'source-over';
+}
+
+function resetAnimation() {
+  startedAt = performance.now();
+  lastFrame = -Infinity;
+  previousStage = '';
+  paint(0);
+  if (texture) texture.needsUpdate = true;
+}
+
+function frame(now) {
+  requestAnimationFrame(frame);
+  if (mode !== 'preview' && !tracking) return;
+  if (now-lastFrame < 1000/30) return;
+  lastFrame = now;
+  const t = Math.max(0,(now-startedAt)/1000);
+  paint(t);
+  if (tracking && texture) texture.needsUpdate = true;
+  const stage = t < 4 ? 'Наступает ночь' : t < 8 ? 'В городе загораются дорожки' :
+    t < 12 ? 'Красные кубы оживают' : t < 15 ? 'Золотая волна' : 'Волшебная ночь';
+  if (stage !== previousStage) status.textContent = previousStage = stage;
+}
+
+function fixVideo() {
+  document.querySelectorAll('video').forEach(video => {
+    video.style.setProperty('z-index','0','important');
+    video.style.setProperty('visibility','visible','important');
+    video.style.setProperty('opacity','1','important');
+  });
+  if (scene.renderer) {
+    scene.renderer.setClearColor(0x000000,0);
+    scene.renderer.setClearAlpha(0);
+    scene.renderer.domElement.style.setProperty('background','transparent','important');
+  }
+  if (scene.object3D) scene.object3D.background = null;
+}
+
+function initVisuals(poster) {
+  if (plane) return;
+  const {THREE} = window;
+  texture = new THREE.CanvasTexture(ink);
+  texture.colorSpace = THREE.SRGBColorSpace;
+  texture.minFilter = THREE.LinearFilter;
+  texture.generateMipmaps = false;
+  const material = new THREE.MeshBasicMaterial({
+    map:texture,transparent:true,depthWrite:false,side:THREE.DoubleSide,toneMapped:false
+  });
+  // MindAR expresses the width of a target as one unit.
+  plane = new THREE.Mesh(new THREE.PlaneGeometry(1,1447/1087),material);
+  plane.position.z = .001;
+  plane.renderOrder = 10;
+  poster.object3D.add(plane);
+}
+
+const loadScript = src => new Promise((resolve,reject) => {
+  const script = document.createElement('script');
+  script.src = src;
+  script.onload = resolve;
+  script.onerror = () => reject(new Error('Не удалось загрузить библиотеку AR.'));
+  document.head.append(script);
+});
+
+async function startCamera() {
+  if (mode !== 'idle') return;
+  mode = 'loading';
+  start.disabled = true;
+  demo.disabled = true;
+  status.textContent = 'Подготавливаем камеру и маркер…';
+  try {
+    if (!navigator.mediaDevices?.getUserMedia) {
+      throw new Error('Откройте страницу по HTTPS в Safari и разрешите доступ к камере.');
+    }
+    const response = await fetch('./targets.mind');
+    if (!response.ok || (await response.arrayBuffer()).byteLength < 1000) {
+      throw new Error('Не удалось загрузить targets.mind. Проверьте файлы публикации.');
+    }
+    await loadScript('https://aframe.io/releases/1.6.0/aframe.min.js');
+    await loadScript('https://cdn.jsdelivr.net/npm/mind-ar@1.2.5/dist/mindar-image-aframe.prod.js');
+
+    scene = document.createElement('a-scene');
+    scene.id = 'ar-scene';
+    scene.setAttribute('mindar-image','imageTargetSrc: ./targets.mind; autoStart: true; uiLoading: no; uiScanning: no; uiError: no;');
+    scene.setAttribute('embedded','');
+    scene.setAttribute('color-space','sRGB');
+    scene.setAttribute('renderer','colorManagement: true; alpha: true; antialias: true;');
+    scene.setAttribute('vr-mode-ui','enabled: false');
+    scene.setAttribute('device-orientation-permission-ui','enabled: false');
+    const camera = document.createElement('a-camera');
+    camera.setAttribute('position','0 0 0');
+    camera.setAttribute('look-controls','enabled: false');
+    const poster = document.createElement('a-entity');
+    poster.setAttribute('mindar-image-target','targetIndex: 0');
+    scene.append(camera,poster);
+
+    const ready = () => { fixVideo(); initVisuals(poster); };
+    scene.addEventListener('renderstart',ready);
+    scene.addEventListener('arReady',() => {
+      ready();
+      if (!tracking) status.textContent = 'Наведите камеру на весь постер';
+    });
+    scene.addEventListener('arError',() => {
+      status.textContent = 'Камера недоступна. Проверьте разрешение в Safari и перезапустите.';
+      start.hidden = false;
+      start.disabled = false;
+      start.textContent = 'Перезапустить';
+    });
+    poster.addEventListener('targetFound',() => {
+      tracking = true;
+      ready();
+      resetAnimation();
+      replay.hidden = false;
+    });
+    poster.addEventListener('targetLost',() => {
+      tracking = false;
+      replay.hidden = true;
+      status.textContent = 'Верните весь постер в кадр';
+    });
+    start.hidden = true;
+    demo.hidden = true;
+    mode = 'camera';
+    status.textContent = 'Разрешите Safari доступ к камере';
+    mount.append(scene);
+    setTimeout(fixVideo,1300);
+    setTimeout(fixVideo,3500);
+  } catch (error) {
+    mode = 'failed';
+    status.textContent = error.message;
+    start.textContent = 'Перезапустить';
+    start.disabled = false;
+    demo.disabled = false;
+  }
+}
+
+start.addEventListener('click',() => {
+  if (mode === 'failed' || mode === 'camera') location.reload();
+  else startCamera();
+});
+demo.addEventListener('click',async () => {
+  const img = preview.querySelector('img');
+  img.src = './3_g.png';
+  try { await img.decode(); }
+  catch { status.textContent = 'Не удалось открыть 3_g.png'; return; }
+  if (mode !== 'idle' && mode !== 'failed') return;
+  preview.dataset.previousMode = mode;
+  mode = 'preview';
+  preview.querySelector('figure').append(ink);
+  start.hidden = demo.hidden = true;
+  preview.hidden = replay.hidden = back.hidden = false;
+  resetAnimation();
+});
+back.addEventListener('click',() => {
+  mode = preview.dataset.previousMode;
+  preview.hidden = replay.hidden = back.hidden = true;
+  start.hidden = demo.hidden = false;
+  status.textContent = 'Город искусств · Волшебная ночь';
+});
+replay.addEventListener('click',resetAnimation);
+requestAnimationFrame(frame);
+</script>
+</body>
+</html>
