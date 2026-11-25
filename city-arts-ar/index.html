@@ -77,7 +77,8 @@ maskContext.putImageData(maskPixels,0,0);
 
 let scene, texture, plane, posterAnchor, overlayAnchor;
 let lostAt = null, lastFadeFrame = 0;
-let poseProbe, previousCorners = null, stableSince = null;
+let poseProbe, measuredPosition, measuredRotation, measuredScale;
+let previousCorners = null, stableSince = null;
 const poseCorners = [[-.5,-1447/2174],[.5,-1447/2174],[.5,1447/2174],[-.5,1447/2174]];
 let mode = 'idle', tracking = false, startedAt = 0, lastFrame = -Infinity;
 let previousStage = '';
@@ -445,15 +446,34 @@ function resetAnimation() {
   if (texture) texture.needsUpdate = true;
 }
 
-function projectPoster() {
+function projectPoster(matrix) {
   const camera = scene.camera;
   const aspect = scene.canvas.clientWidth/scene.canvas.clientHeight;
   const points = poseCorners.map(([x,y]) => {
-    poseProbe.set(x,y,0).applyMatrix4(posterAnchor.matrix).project(camera);
+    poseProbe.set(x,y,0).applyMatrix4(matrix).project(camera);
     return [poseProbe.x*aspect*.5,poseProbe.y*.5,poseProbe.z];
   });
   return points.every(([x,y,z]) => Number.isFinite(x) && Number.isFinite(y) && z >= -1 && z <= 1)
     ? points : null;
+}
+
+function cornerShift(a,b) {
+  return a && b
+    ? Math.max(...a.map(([x,y],i) => Math.hypot(x-b[i][0],y-b[i][1])))
+    : Infinity;
+}
+
+function applyOverlayPose(corners,elapsed,snap) {
+  const anchor = overlayAnchor;
+  posterAnchor.matrix.decompose(measuredPosition,measuredRotation,measuredScale);
+  // Ease tiny corrections over several frames and follow deliberate motion faster.
+  const gap = snap ? 0 : cornerShift(corners,projectPoster(anchor.matrix));
+  const timeConstant = 115-88*ease((gap-.0025)/.024);
+  const blend = snap ? 1 : 1-Math.exp(-elapsed/timeConstant);
+  anchor.position.lerp(measuredPosition,blend);
+  anchor.quaternion.slerp(measuredRotation,blend);
+  anchor.scale.lerp(measuredScale,blend);
+  anchor.updateMatrix();
 }
 
 function pauseTracking(now, message) {
@@ -466,10 +486,9 @@ function updateOverlay(now) {
   const elapsed = Math.min(50, Math.max(0, now-lastFadeFrame));
   lastFadeFrame = now;
   const material = plane.material;
-  const corners = tracking ? projectPoster() : null;
-  const shift = corners && previousCorners
-    ? Math.max(...corners.map(([x,y],i) => Math.hypot(x-previousCorners[i][0],y-previousCorners[i][1])))
-    : Infinity;
+  const wasHidden = material.opacity === 0;
+  const corners = tracking ? projectPoster(posterAnchor.matrix) : null;
+  const shift = cornerShift(corners,previousCorners);
   if (shift > .018) stableSince = corners ? now : null;
   const hadPose = previousCorners !== null;
   previousCorners = corners;
@@ -493,8 +512,7 @@ function updateOverlay(now) {
 
   // Keep the last accepted pose during the fade and switch while transparent.
   if (corners && lostAt === null) {
-    overlayAnchor.matrix.copy(posterAnchor.matrix);
-    overlayAnchor.matrixWorldNeedsUpdate = true;
+    applyOverlayPose(corners,elapsed,wasHidden || material.opacity === 0);
   }
   overlayAnchor.visible = material.opacity > 0;
 }
@@ -543,6 +561,9 @@ function initVisuals(poster) {
   plane.position.z = .001;
   plane.renderOrder = 10;
   poseProbe = new THREE.Vector3();
+  measuredPosition = new THREE.Vector3();
+  measuredRotation = new THREE.Quaternion();
+  measuredScale = new THREE.Vector3();
   posterAnchor = poster.object3D;
   overlayAnchor = new THREE.Group();
   overlayAnchor.matrixAutoUpdate = false;
