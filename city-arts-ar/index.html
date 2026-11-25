@@ -248,6 +248,101 @@ function drawFireworks(t) {
   });
 }
 
+// Opening corners in the poster: upper left, upper right, lower right, lower left.
+const stages = [
+  {opening:[[96,253],[174,232],[181,303],[100,309]],color:'255,168,74',tempo:1.35},   // Theatre
+  {opening:[[452,267],[512,256],[580,277],[579,314],[456,329]],color:'255,117,91',tempo:1.95}, // Concert hall
+  {opening:[[209,340],[281,320],[283,378],[210,393]],color:'122,192,255',tempo:2.6},  // Blue stage
+  {opening:[[386,348],[452,357],[449,396],[386,379]],color:'255,204,153',tempo:1.12},  // Fashion
+  {opening:[[60,405],[146,389],[151,449],[64,472]],color:'172,245,132',tempo:2.23},   // Film studio
+  {opening:[[515,382],[602,403],[600,457],[516,432]],color:'182,150,255',tempo:2.8,screen:true},
+  {opening:[[49,550],[144,512],[160,557],[50,595]],color:'255,214,134',tempo:.82},    // Gallery
+  {opening:[[521,508],[616,523],[621,585],[521,552]],color:'255,153,207',tempo:1.69}  // Print studio
+];
+
+function stagePoint(opening,u,v) {
+  const [left,upperRight,lowerRight,lowerLeft] = opening.length === 5
+    ? [opening[0],opening[2],opening[3],opening[4]] : opening;
+  return [0,1].map(axis => {
+    const upper = left[axis]*(1-u)+upperRight[axis]*u;
+    const lower = lowerLeft[axis]*(1-u)+lowerRight[axis]*u;
+    return upper*(1-v)+lower*v;
+  });
+}
+
+function drawStages(t,motion) {
+  stages.forEach(({opening,color,tempo,screen},i) => {
+    const lit = ease((t-6.8-i*.34)/.8);
+    if (!lit) return;
+    const beat = motion*tempo+i*1.07;
+    const floorLeft = stagePoint(opening,0,1);
+    const floorRight = stagePoint(opening,1,1);
+    const width = Math.hypot(floorRight[0]-floorLeft[0],floorRight[1]-floorLeft[1]);
+    const floorAngle = Math.atan2(floorRight[1]-floorLeft[1],floorRight[0]-floorLeft[0]);
+    ctx.save();
+    ctx.beginPath();
+    opening.forEach(([x,y],n) => n ? ctx.lineTo(x,y) : ctx.moveTo(x,y));
+    ctx.closePath();
+    ctx.clip();
+
+    const [cx,cy] = stagePoint(opening,.5,.54);
+    glow(cx,cy,width*.63,lit*.22,color);
+    if (screen) {
+      for (let j=0;j<7;j++) {
+        const bar = .21+.26*(.5+.5*Math.sin(beat*1.16+j*1.7));
+        const u = .23+j*.087;
+        const [x,y] = stagePoint(opening,u,.69-bar);
+        const [bx,by] = stagePoint(opening,u,.69);
+        ctx.strokeStyle = 'rgba(165,133,255,' + lit*.39 + ')';
+        ctx.lineWidth = width*.037;
+        ctx.beginPath();
+        ctx.moveTo(x,y);
+        ctx.lineTo(bx,by);
+        ctx.stroke();
+      }
+    }
+    for (let j=0;j<2;j++) {
+      const fixture = j ? .76 : .24;
+      const swing = .18*Math.sin(beat+j*2.25);
+      const aim = (j ? .61 : .39) + swing;
+      const [x,y] = stagePoint(opening,fixture,.086);
+      const [px,py] = stagePoint(opening,aim,j ? .88 : .94);
+      const [lx,ly] = stagePoint(opening,aim-.125,j ? .9 : .98);
+      const [rx,ry] = stagePoint(opening,aim+.125,j ? .9 : .98);
+      const intensity = lit*(.85+.15*Math.cos(beat+j*1.9));
+      const beam = ctx.createLinearGradient(x,y,px,py);
+      beam.addColorStop(0,'rgba(255,239,206,' + .65*intensity + ')');
+      beam.addColorStop(.34,'rgba(' + color + ',' + .37*intensity + ')');
+      beam.addColorStop(1,'rgba(' + color + ',' + .17*intensity + ')');
+      ctx.fillStyle = beam;
+      ctx.beginPath();
+      ctx.moveTo(x-1.5,y);
+      ctx.lineTo(x+1.5,y);
+      ctx.lineTo(rx,ry);
+      ctx.quadraticCurveTo(px,py+width*.13,lx,ly);
+      ctx.closePath();
+      ctx.fill();
+
+      ctx.save();
+      ctx.translate(px,py);
+      ctx.rotate(floorAngle);
+      ctx.scale(1,.35);
+      glow(0,0,width*.23,intensity*.88,color);
+      glow(0,0,width*.1,intensity*.61,'255,231,187');
+      ctx.restore();
+      glow(x,y,width*.12,intensity*.85,color);
+      ctx.fillStyle = 'rgba(255,244,216,' + intensity + ')';
+      ctx.fillRect(x-1.5,y-1.1,3,2.2);
+    }
+
+    for (let j=1;j<=5;j++) {
+      const [x,y] = stagePoint(opening,j/6,.93);
+      glow(x,y,width*.08,lit*(.44+.24*Math.cos(beat*1.5-j*.8)),color);
+    }
+    ctx.restore();
+  });
+}
+
 function paint(t) {
   const night = ease(t / 4);
   const motion = reducedMotion ? 0 : t;
@@ -280,6 +375,8 @@ function paint(t) {
     ctx.fillStyle = 'rgba(255,248,213,' + (.72*strength) + ')';
     ctx.fillRect(x+1,y+1,Math.max(1,w-3),Math.max(1,h-4));
   });
+
+  drawStages(t,motion);
 
   if (pulse) cubes.forEach(({x,y,r,outline},i) => {
     const wave = .46+.26*Math.sin(motion*4.3-i*.85);
@@ -412,7 +509,7 @@ function frame(now) {
   paint(t);
   if (tracking && texture) texture.needsUpdate = true;
   const stage = t < 3 ? 'Город укрывает снег' : t < 6.5 ? 'Зажигаются фонари' :
-    t < 12 ? 'На площади загораются ёлки' :
+    t < 8 ? 'На площади загораются ёлки' : t < 12 ? 'На сценах зажигаются софиты' :
     t < 17 && !reducedMotion ? 'Новогодний салют' : 'Новогодняя ночь';
   if (stage !== previousStage) status.textContent = previousStage = stage;
 }
