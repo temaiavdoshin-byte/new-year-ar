@@ -77,6 +77,7 @@ maskContext.putImageData(maskPixels,0,0);
 
 let scene, texture, plane, posterAnchor, overlayAnchor;
 const restartAfterMissingMs = 3000;
+const openingSeconds = 2.4;
 let lostAt = null, targetMissingSince = null, restartOnRecovery = false, lastFadeFrame = 0;
 let poseProbe, measuredPosition, measuredRotation, measuredScale;
 let previousCorners = null, stableSince = null, turnMotion = null;
@@ -345,11 +346,50 @@ function drawStages(t,motion) {
   });
 }
 
-function paint(t) {
+function drawOpeningWave(t) {
+  if (t >= openingSeconds) return;
+  const centerCube = cubes[1];
+  const originY = 487;
+  const flash = ease(t/.18)*(1-ease((t-.2)/.7));
+  glow(centerCube.x,centerCube.y,69,flash*.67,'255,73,28');
+  glow(centerCube.x,centerCube.y+13,34,flash*.78,'255,228,146');
+  glow(centerCube.x,originY,53,flash*.52,'255,167,59');
+
+  if (reducedMotion) {
+    const halo = ease(t/.55)*(1-ease((t-1.12)/.92));
+    glow(centerCube.x,originY,126,halo*.34,'255,207,124');
+    return;
+  }
+
+  ctx.save();
+  ctx.translate(centerCube.x,originY);
+  ctx.scale(1,.42);
+  const colors = ['255,190,89','255,224,147','255,164,75'];
+  colors.forEach((color,i) => {
+    const age = t-.16-i*.23;
+    const progress = age/1.69;
+    if (progress <= 0 || progress >= 1) return;
+    const radius = 21+369*progress;
+    const spread = 16+radius*.16;
+    const strength = (.61-i*.097)*ease(progress/.14)*(1-ease((progress-.49)/.51));
+    const outer = radius+spread;
+    const band = ctx.createRadialGradient(0,0,radius-spread,0,0,outer);
+    band.addColorStop(0,'rgba(' + color + ',0)');
+    band.addColorStop(.34,'rgba(' + color + ',' + strength*.41 + ')');
+    band.addColorStop(.55,'rgba(' + color + ',' + strength + ')');
+    band.addColorStop(.72,'rgba(' + color + ',' + strength*.58 + ')');
+    band.addColorStop(1,'rgba(' + color + ',0)');
+    ctx.fillStyle = band;
+    ctx.fillRect(-outer,-outer,2*outer,2*outer);
+  });
+  ctx.restore();
+}
+
+function paint(elapsed) {
+  const t = Math.max(0,elapsed-openingSeconds);
   const night = ease(t / 4);
   const motion = reducedMotion ? 0 : t;
   const pulse = ease((t-7.8)/1.2);
-  const finale = (t-12)/3;
   ctx.globalCompositeOperation = 'source-over';
   ctx.clearRect(0,0,W,H);
   const dusk = ctx.createLinearGradient(0,0,0,H);
@@ -361,6 +401,7 @@ function paint(t) {
   ctx.fillRect(0,0,W,H);
   drawSnowbanks(t);
   ctx.globalCompositeOperation = 'screen';
+  drawOpeningWave(elapsed);
 
   stars.forEach(({x,y,phase}) => {
     const brightness = night * (.48 + .28 * Math.sin(motion*1.7+phase));
@@ -398,24 +439,6 @@ function paint(t) {
     }
   });
 
-  if (!reducedMotion && finale > 0 && finale < 1) {
-    const radius = 18+finale*565;
-    const intensity = Math.sin(Math.PI*finale)**.75;
-    ctx.save();
-    ctx.translate(333,484);
-    ctx.scale(1,.65);
-    for (let i=0;i<3;i++) {
-      ctx.beginPath();
-      ctx.arc(0,0,Math.max(1,radius-i*21),0,Math.PI*2);
-      ctx.lineWidth = 7-i*2;
-      ctx.shadowColor = '#ffbf53';
-      ctx.shadowBlur = 24;
-      ctx.strokeStyle = 'rgba(255,216,137,' + (intensity*(.91-i*.25)) + ')';
-      ctx.stroke();
-    }
-    ctx.restore();
-    glow(333,484,170+finale*120,intensity*.48,'255,207,108');
-  }
   ctx.globalCompositeOperation = 'source-over';
   drawLanterns(t);
   trees.forEach(([x,y,h],i) => {
@@ -547,10 +570,11 @@ function frame(now) {
   if (mode !== 'preview' && (!tracking || lostAt !== null)) return;
   if (now-lastFrame < 1000/30) return;
   lastFrame = now;
-  const t = Math.max(0,(now-startedAt)/1000);
-  paint(t);
+  const elapsed = Math.max(0,(now-startedAt)/1000);
+  paint(elapsed);
   if (tracking && texture) texture.needsUpdate = true;
-  const stage = t < 3 ? 'Город укрывает снег' : t < 6.5 ? 'Зажигаются фонари' :
+  const t = elapsed-openingSeconds;
+  const stage = t < 0 ? 'Волна света' : t < 3 ? 'Город укрывает снег' : t < 6.5 ? 'Зажигаются фонари' :
     t < 8 ? 'На площади загораются ёлки' : t < 12 ? 'На сценах зажигаются софиты' :
     t < 17 && !reducedMotion ? 'Новогодний салют' : 'Новогодняя ночь';
   if (stage !== previousStage) status.textContent = previousStage = stage;
