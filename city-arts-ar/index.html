@@ -51,7 +51,15 @@ const ink = document.createElement('canvas');
 const W = 638, H = 850;
 ink.width = W;
 ink.height = H;
-const ctx = ink.getContext('2d');
+const previewContext = ink.getContext('2d');
+const posterHeight = 1447/1087;
+const maskPadding = 38, maskFeather = 24;
+const cameraInk = document.createElement('canvas');
+cameraInk.width = W+maskPadding*2;
+cameraInk.height = H+maskPadding*2;
+const cameraContext = cameraInk.getContext('2d');
+cameraContext.translate(maskPadding,maskPadding);
+let ctx = previewContext;
 const winterScenery = new Image();
 winterScenery.src = './winter-scenery.webp';
 let unlitTrees;
@@ -61,16 +69,16 @@ const reducedMotion = matchMedia('(prefers-reduced-motion: reduce)').matches;
 const clamp = n => Math.max(0, Math.min(1, n));
 const ease = n => { const x = clamp(n); return x * x * (3 - 2 * x); };
 
-// Precompute the edge falloff once. Canvas coordinates match the tracked poster.
+// Only the extra area outside the poster fades into the camera image.
 const edgeMask = document.createElement('canvas');
-edgeMask.width = W;
-edgeMask.height = H;
+edgeMask.width = cameraInk.width;
+edgeMask.height = cameraInk.height;
 const maskContext = edgeMask.getContext('2d');
-const maskPixels = maskContext.createImageData(W,H);
-for (let y=0;y<H;y++) {
-  for (let x=0;x<W;x++) {
-    const distance = Math.min(x,W-1-x,y,H-1-y);
-    maskPixels.data[(y*W+x)*4+3] = Math.round(255*ease((distance-2)/30));
+const maskPixels = maskContext.createImageData(edgeMask.width,edgeMask.height);
+for (let y=0;y<edgeMask.height;y++) {
+  for (let x=0;x<edgeMask.width;x++) {
+    const distance = Math.min(x,edgeMask.width-1-x,y,edgeMask.height-1-y);
+    maskPixels.data[(y*edgeMask.width+x)*4+3] = Math.round(255*ease(distance/maskFeather));
   }
 }
 maskContext.putImageData(maskPixels,0,0);
@@ -84,7 +92,7 @@ const partyDelay = waveStartsAt+waveDuration-firstStageLight;
 let lostAt = null, targetMissingSince = null, restartOnRecovery = false, lastFadeFrame = 0;
 let poseProbe, measuredPosition, measuredRotation, measuredScale;
 let previousCorners = null, stableSince = null, turnMotion = null;
-const poseCorners = [[-.5,-1447/2174],[.5,-1447/2174],[.5,1447/2174],[-.5,1447/2174]];
+const poseCorners = [[-.5,-posterHeight/2],[.5,-posterHeight/2],[.5,posterHeight/2],[-.5,posterHeight/2]];
 let mode = 'idle', tracking = false, startedAt = 0, lastFrame = -Infinity;
 let previousStage = '';
 
@@ -433,19 +441,28 @@ function drawPlazaWave(t) {
 }
 
 function paint(t) {
+  const cameraView = mode === 'camera';
+  const padding = cameraView ? maskPadding : 0;
+  ctx = cameraView ? cameraContext : previewContext;
   const partyTime = t-partyDelay;
   const night = ease(t / 4);
   const motion = reducedMotion ? 0 : t;
   const pulse = ease((partyTime-7.8)/1.2);
   ctx.globalCompositeOperation = 'source-over';
-  ctx.clearRect(0,0,W,H);
+  ctx.clearRect(-padding,-padding,W+padding*2,H+padding*2);
   const dusk = ctx.createLinearGradient(0,0,0,H);
   dusk.addColorStop(0, 'rgba(12,18,58,' + (.73*night) + ')');
   dusk.addColorStop(.19, 'rgba(15,18,55,' + (.55*night) + ')');
   dusk.addColorStop(.58, 'rgba(17,15,49,' + (.46*night) + ')');
   dusk.addColorStop(1, 'rgba(7,11,31,' + (.56*night) + ')');
   ctx.fillStyle = dusk;
-  ctx.fillRect(0,0,W,H);
+  ctx.fillRect(-padding,-padding,W+padding*2,H+padding*2);
+  if (cameraView) {
+    ctx.save();
+    ctx.beginPath();
+    ctx.rect(0,0,W,H);
+    ctx.clip();
+  }
   drawSnowbanks(t);
   ctx.globalCompositeOperation = 'screen';
   drawPlazaWave(t-waveStartsAt);
@@ -504,9 +521,10 @@ function paint(t) {
     }
     drawFireworks(partyTime);
   }
-  if (mode === 'camera') {
+  if (cameraView) {
+    ctx.restore();
     ctx.globalCompositeOperation = 'destination-in';
-    ctx.drawImage(edgeMask,0,0);
+    ctx.drawImage(edgeMask,-padding,-padding);
     ctx.globalCompositeOperation = 'source-over';
   }
 }
@@ -647,15 +665,17 @@ function fixVideo() {
 function initVisuals(poster) {
   if (plane) return;
   const {THREE} = window;
-  texture = new THREE.CanvasTexture(ink);
+  texture = new THREE.CanvasTexture(cameraInk);
   texture.colorSpace = THREE.SRGBColorSpace;
   texture.minFilter = THREE.LinearFilter;
   texture.generateMipmaps = false;
   const material = new THREE.MeshBasicMaterial({
     map:texture,transparent:true,opacity:0,depthWrite:false,side:THREE.DoubleSide,toneMapped:false
   });
-  // MindAR expresses the width of a target as one unit.
-  plane = new THREE.Mesh(new THREE.PlaneGeometry(1,1447/1087),material);
+  // Expand the plane by exactly the added pixels so the artwork keeps its original scale.
+  const planeWidth = cameraInk.width/W;
+  const planeHeight = posterHeight*cameraInk.height/H;
+  plane = new THREE.Mesh(new THREE.PlaneGeometry(planeWidth,planeHeight),material);
   plane.position.z = .001;
   plane.renderOrder = 10;
   poseProbe = new THREE.Vector3();
