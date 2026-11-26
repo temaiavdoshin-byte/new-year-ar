@@ -77,7 +77,9 @@ maskContext.putImageData(maskPixels,0,0);
 
 let scene, texture, plane, posterAnchor, overlayAnchor;
 const restartAfterMissingMs = 3000;
-const openingSeconds = 2.4;
+const waveStartsAt = 9.4, waveDuration = 2.4;
+const firstStageLight = 6.8;
+const partyDelay = waveStartsAt+waveDuration-firstStageLight;
 let lostAt = null, targetMissingSince = null, restartOnRecovery = false, lastFadeFrame = 0;
 let poseProbe, measuredPosition, measuredRotation, measuredScale;
 let previousCorners = null, stableSince = null, turnMotion = null;
@@ -275,7 +277,7 @@ function stagePoint(opening,u,v) {
 
 function drawStages(t,motion) {
   stages.forEach(({opening,color,tempo,screen},i) => {
-    const lit = ease((t-6.8-i*.34)/.8);
+    const lit = ease((t-firstStageLight-i*.34)/.8);
     if (!lit) return;
     const beat = motion*tempo+i*1.07;
     const floorLeft = stagePoint(opening,0,1);
@@ -346,8 +348,8 @@ function drawStages(t,motion) {
   });
 }
 
-function drawOpeningWave(t) {
-  if (t >= openingSeconds) return;
+function drawPlazaWave(t) {
+  if (t < 0 || t >= waveDuration) return;
   const centerCube = cubes[1];
   const originY = 487;
   const flash = ease(t/.18)*(1-ease((t-.2)/.7));
@@ -385,11 +387,11 @@ function drawOpeningWave(t) {
   ctx.restore();
 }
 
-function paint(elapsed) {
-  const t = Math.max(0,elapsed-openingSeconds);
+function paint(t) {
+  const partyTime = t-partyDelay;
   const night = ease(t / 4);
   const motion = reducedMotion ? 0 : t;
-  const pulse = ease((t-7.8)/1.2);
+  const pulse = ease((partyTime-7.8)/1.2);
   ctx.globalCompositeOperation = 'source-over';
   ctx.clearRect(0,0,W,H);
   const dusk = ctx.createLinearGradient(0,0,0,H);
@@ -401,7 +403,7 @@ function paint(elapsed) {
   ctx.fillRect(0,0,W,H);
   drawSnowbanks(t);
   ctx.globalCompositeOperation = 'screen';
-  drawOpeningWave(elapsed);
+  drawPlazaWave(t-waveStartsAt);
 
   stars.forEach(({x,y,phase}) => {
     const brightness = night * (.48 + .28 * Math.sin(motion*1.7+phase));
@@ -419,11 +421,11 @@ function paint(elapsed) {
     ctx.fillRect(x+1,y+1,Math.max(1,w-3),Math.max(1,h-4));
   });
 
-  drawStages(t,motion);
+  drawStages(partyTime,reducedMotion ? 0 : partyTime);
 
   if (pulse) cubes.forEach(({x,y,r,outline},i) => {
     const wave = .46+.26*Math.sin(motion*4.3-i*.85);
-    const level = pulse * (t < 12 ? wave : .34+.19*wave);
+    const level = pulse * (partyTime < 12 ? wave : .34+.19*wave);
     glow(x,y,r,level*.78,'255,45,33');
     ctx.beginPath();
     outline.forEach(([px,py],j) => j ? ctx.lineTo(px,py) : ctx.moveTo(px,py));
@@ -434,7 +436,7 @@ function paint(elapsed) {
     ctx.strokeStyle = 'rgba(255,183,110,' + level + ')';
     ctx.stroke();
     if (!reducedMotion) for (let j=0;j<9;j++) {
-      const life = ((t-7.8)*.55+j*.137)%1;
+      const life = ((partyTime-7.8)*.55+j*.137)%1;
       glow(x+Math.sin(j*2.4)*life*52,y-life*77,5,(1-life)*level,'255,225,136');
     }
   });
@@ -453,7 +455,7 @@ function paint(elapsed) {
       const size = i%4===0 ? 2 : 1;
       ctx.fillRect(x,y,size,size);
     }
-    drawFireworks(t);
+    drawFireworks(partyTime);
   }
   if (mode === 'camera') {
     ctx.globalCompositeOperation = 'destination-in';
@@ -570,13 +572,14 @@ function frame(now) {
   if (mode !== 'preview' && (!tracking || lostAt !== null)) return;
   if (now-lastFrame < 1000/30) return;
   lastFrame = now;
-  const elapsed = Math.max(0,(now-startedAt)/1000);
-  paint(elapsed);
+  const t = Math.max(0,(now-startedAt)/1000);
+  paint(t);
   if (tracking && texture) texture.needsUpdate = true;
-  const t = elapsed-openingSeconds;
-  const stage = t < 0 ? 'Волна света' : t < 3 ? 'Город укрывает снег' : t < 6.5 ? 'Зажигаются фонари' :
-    t < 8 ? 'На площади загораются ёлки' : t < 12 ? 'На сценах зажигаются софиты' :
-    t < 17 && !reducedMotion ? 'Новогодний салют' : 'Новогодняя ночь';
+  const stage = t < 3 ? 'Город укрывает снег' : t < 6.5 ? 'Зажигаются фонари' :
+    t < waveStartsAt ? 'На площади загораются ёлки' :
+    t < waveStartsAt+waveDuration ? 'Волна света' :
+    t < partyDelay+12 ? 'На сценах зажигаются софиты' :
+    t < partyDelay+17 && !reducedMotion ? 'Новогодний салют' : 'Новогодняя ночь';
   if (stage !== previousStage) status.textContent = previousStage = stage;
 }
 
