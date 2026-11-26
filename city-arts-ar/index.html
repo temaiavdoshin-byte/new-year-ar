@@ -54,7 +54,8 @@ ink.height = H;
 const ctx = ink.getContext('2d');
 const winterScenery = new Image();
 winterScenery.src = './winter-scenery.webp';
-const sceneryReady = winterScenery.decode();
+let unlitTrees;
+const sceneryReady = winterScenery.decode().then(prepareUnlitTrees);
 sceneryReady.catch(() => {});
 const reducedMotion = matchMedia('(prefers-reduced-motion: reduce)').matches;
 const clamp = n => Math.max(0, Math.min(1, n));
@@ -204,22 +205,66 @@ function drawLanterns(t) {
   });
 }
 
-function drawTree(x,y,h,appear,motion,i) {
+function prepareUnlitTrees() {
+  // Derive the unlit layer once so the snowy branches stay aligned during ignition.
+  const [width,height] = [winterScenery.naturalWidth,treeSprites[0][1]+treeSprites[0][3]];
+  unlitTrees = document.createElement('canvas');
+  unlitTrees.width = width;
+  unlitTrees.height = height;
+  const off = unlitTrees.getContext('2d',{willReadFrequently:true});
+  off.drawImage(winterScenery,0,0,width,height,0,0,width,height);
+  let image;
+  try {
+    image = off.getImageData(0,0,width,height);
+  } catch (error) {
+    // Local file previews can prohibit reading pixels even when drawing is allowed.
+    if (error.name !== 'SecurityError') throw error;
+    off.globalCompositeOperation = 'source-atop';
+    off.fillStyle = 'rgba(12,23,30,.55)';
+    off.fillRect(0,0,width,height);
+    return;
+  }
+  const pixels = image.data;
+  for (let i=0;i<pixels.length;i+=4) {
+    if (!pixels[i+3]) continue;
+    const r = pixels[i], g = pixels[i+1], b = pixels[i+2];
+    const amber = Math.min(ease((r-b-13)/37),ease((g-b-3)/18));
+    const dim = 1-.71*amber*ease((r-105)/95);
+    pixels[i] = r*dim;
+    pixels[i+1] = g*dim;
+    pixels[i+2] = b*dim;
+  }
+  off.putImageData(image,0,0);
+}
+
+const treeLights = [[-.2,.31],[.15,.4],[-.12,.58],[.22,.64],[-.27,.73],[.03,.78]];
+
+function drawTree(x,y,h,appear,motion,i,ignition) {
   if (!appear) return;
   const [sx,sy,sw,sh] = treeSprites[[1,2,0,1,0,1,2,0][i]];
   const height = h*(.82+.18*appear);
   const width = height*sw/sh;
   groundShadow(x+width*.08,y,width*.72,h*.115,appear*.79);
-  glow(x,y-height*.33,width*.88,appear*.19,'255,164,62');
+  glow(x,y-height*.33,width*.88,appear*ignition*.19,'255,164,62');
   ctx.save();
   ctx.globalAlpha = appear;
-  ctx.drawImage(winterScenery,sx,sy,sw,sh,x-width/2,y-height,width,height);
-  const lights = [[-.2,.31],[.15,.4],[-.12,.58],[.22,.64],[-.27,.73],[.03,.78]];
-  lights.forEach(([dx,dy],j) => {
-    const twinkle = .24+.34*Math.pow(Math.max(0,Math.sin(motion*2.4+i+j*1.86)),3);
-    glow(x+dx*width,y-height*(1-dy),height*.078,twinkle,'255,198,103');
-  });
-  glow(x,y-height*.976,height*.17,.41+.16*Math.sin(motion*2+i),'255,203,101');
+  if (ignition < 1) {
+    ctx.drawImage(unlitTrees,sx,sy,sw,sh,x-width/2,y-height,width,height);
+  }
+  if (ignition > 0) {
+    ctx.globalAlpha = appear*ignition;
+    ctx.drawImage(winterScenery,sx,sy,sw,sh,x-width/2,y-height,width,height);
+    treeLights.forEach(([dx,dy],j) => {
+      const twinkle = .37+.48*Math.pow(Math.max(0,Math.sin(motion*2.4+i+j*1.86)),3);
+      const bulbX = x+dx*width, bulbY = y-height*(1-dy);
+      glow(bulbX,bulbY,height*.073,twinkle,'255,181,74');
+      ctx.fillStyle = 'rgba(255,237,180,' + (.47+twinkle*.5) + ')';
+      ctx.beginPath();
+      ctx.arc(bulbX,bulbY,Math.max(.56,height*.011),0,Math.PI*2);
+      ctx.fill();
+    });
+    glow(x,y-height*.976,height*.17,.41+.16*Math.sin(motion*2+i),'255,203,101');
+  }
   ctx.restore();
 }
 
@@ -444,7 +489,9 @@ function paint(t) {
   ctx.globalCompositeOperation = 'source-over';
   drawLanterns(t);
   trees.forEach(([x,y,h],i) => {
-    drawTree(x,y,h,ease((t-6.5-i*.19)/1.35),motion,i);
+    const appear = ease((t-6.5-i*.19)/1.35);
+    const ignition = ease((partyTime-firstStageLight-i*.1)/.65);
+    drawTree(x,y,h,appear,motion,i,ignition);
   });
 
   if (t > .9 && !reducedMotion) {
@@ -576,9 +623,9 @@ function frame(now) {
   paint(t);
   if (tracking && texture) texture.needsUpdate = true;
   const stage = t < 3 ? 'Город укрывает снег' : t < 6.5 ? 'Зажигаются фонари' :
-    t < waveStartsAt ? 'На площади загораются ёлки' :
+    t < waveStartsAt ? 'На площади появляются ёлки' :
     t < waveStartsAt+waveDuration ? 'Волна света' :
-    t < partyDelay+12 ? 'На сценах зажигаются софиты' :
+    t < partyDelay+12 ? 'Зажигаются гирлянды и софиты' :
     t < partyDelay+17 && !reducedMotion ? 'Новогодний салют' : 'Новогодняя ночь';
   if (stage !== previousStage) status.textContent = previousStage = stage;
 }
