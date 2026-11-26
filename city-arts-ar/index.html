@@ -9,9 +9,9 @@
 * { box-sizing: border-box }
 html,body { width:100%;height:100%;margin:0;overflow:hidden;color:#fff;font-family:system-ui,sans-serif }
 body { background:transparent!important }
-#mount { position:fixed;inset:0;width:100vw;height:100dvh }
-body>video,video { position:fixed!important;top:0!important;left:0!important;width:100vw!important;height:100dvh!important;object-fit:cover!important;z-index:0!important;opacity:1!important;visibility:visible!important }
-a-scene,#ar-scene { position:fixed!important;inset:0!important;width:100vw!important;height:100dvh!important;z-index:1!important;background:transparent!important }
+#mount { position:fixed;inset:0;width:100vw;height:100vh;height:100dvh }
+body>video,video { position:fixed!important;top:0!important;left:0!important;width:100vw!important;height:100vh!important;height:100dvh!important;object-fit:cover!important;z-index:0!important;opacity:1!important;visibility:visible!important }
+a-scene,#ar-scene { position:fixed!important;inset:0!important;width:100vw!important;height:100vh!important;height:100dvh!important;z-index:1!important;background:transparent!important }
 a-scene canvas,canvas.a-canvas { background:transparent!important }
 .a-enter-vr,.a-enter-ar,.a-orientation-modal { display:none!important }
 [hidden] { display:none!important }
@@ -20,7 +20,7 @@ a-scene canvas,canvas.a-canvas { background:transparent!important }
 #actions { display:flex;flex-wrap:wrap;justify-content:center;gap:8px }
 button { pointer-events:auto;touch-action:manipulation;border:1px solid #d3ab7e;border-radius:12px;padding:10px 14px;background:#422a40;color:white;font:inherit;cursor:pointer }
 #preview { position:fixed;inset:0;z-index:10;display:grid;place-items:center;background:#15142a;padding:58px 8px 66px }
-#preview figure { position:relative;margin:0;width:min(calc(100vw - 16px), calc((100dvh - 124px) * 1087 / 1447));aspect-ratio:1087/1447 }
+#preview figure { position:relative;margin:0;width:min(calc(100vw - 16px), calc((100vh - 124px) * 1087 / 1447));width:min(calc(100vw - 16px), calc((100dvh - 124px) * 1087 / 1447));aspect-ratio:1087/1447 }
 #preview img,#preview canvas { width:100%;height:100%;object-fit:contain;display:block }
 #preview canvas { position:absolute;inset:0 }
 </style>
@@ -698,6 +698,18 @@ const loadScript = src => new Promise((resolve,reject) => {
   document.head.append(script);
 });
 
+function showCameraError(message) {
+  mode = 'failed';
+  tracking = false;
+  mount.hidden = true;
+  status.textContent = message;
+  start.textContent = 'Перезапустить';
+  start.hidden = false;
+  start.disabled = false;
+  demo.hidden = false;
+  demo.disabled = false;
+}
+
 async function startCamera() {
   if (mode !== 'idle') return;
   mode = 'loading';
@@ -705,8 +717,8 @@ async function startCamera() {
   demo.disabled = true;
   status.textContent = 'Подготавливаем камеру и маркер…';
   try {
-    if (!navigator.mediaDevices?.getUserMedia) {
-      throw new Error('Откройте страницу по HTTPS в Safari и разрешите доступ к камере.');
+    if (!window.isSecureContext || !navigator.mediaDevices?.getUserMedia) {
+      throw new Error('Для доступа к камере откройте страницу по HTTPS в Chrome на Android или в Safari на iPhone.');
     }
     await sceneryReady.catch(() => { throw new Error('Не удалось загрузить winter-scenery.webp. Проверьте файлы публикации.'); });
     const response = await fetch('./targets.mind');
@@ -743,10 +755,7 @@ async function startCamera() {
       if (!tracking) status.textContent = 'Наведите камеру на весь постер';
     });
     scene.addEventListener('arError',() => {
-      status.textContent = 'Камера недоступна. Проверьте разрешение в Safari и перезапустите.';
-      start.hidden = false;
-      start.disabled = false;
-      start.textContent = 'Перезапустить';
+      showCameraError('Камера недоступна. Разрешите доступ к камере в настройках браузера или откройте просмотр без камеры.');
     });
     poster.addEventListener('targetFound',() => {
       if (targetMissingSince !== null) {
@@ -771,16 +780,12 @@ async function startCamera() {
     start.hidden = true;
     demo.hidden = true;
     mode = 'camera';
-    status.textContent = 'Разрешите Safari доступ к камере';
+    status.textContent = 'Разрешите браузеру доступ к камере';
     mount.append(scene);
     setTimeout(fixVideo,1300);
     setTimeout(fixVideo,3500);
   } catch (error) {
-    mode = 'failed';
-    status.textContent = error.message;
-    start.textContent = 'Перезапустить';
-    start.disabled = false;
-    demo.disabled = false;
+    showCameraError(error.message);
   }
 }
 
